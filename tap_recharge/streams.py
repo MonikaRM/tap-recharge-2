@@ -16,6 +16,11 @@ LOGGER = singer.get_logger()
 
 MAX_PAGE_LIMIT = 50
 
+REQUIRED_CONFIG_KEYS = [
+    'access_token',
+    'start_date',
+    'user_agent'
+]
 
 def get_recharge_bookmark(
         state: dict,
@@ -449,15 +454,21 @@ class Shop(FullTableStream):
 class Subscriptions(CursorPagingStream):
     """
     Retrieves subscriptions from the Recharge API.
-
     Docs: https://developer.rechargepayments.com/#list-subscriptions
     """
+
+    parsed_args = utils.parse_args(REQUIRED_CONFIG_KEYS)
+
+
     tap_stream_id = 'subscriptions'
     key_properties = ['id']
     path = 'subscriptions'
     replication_key = 'updated_at'
+    created_at_min = parsed_args.config['created_at_min']
+    created_at_max = parsed_args.config['created_at_max']
     valid_replication_keys = ['updated_at']
-    params = {'sort_by': f'{replication_key}-asc'}
+    #params = {'sort_by':f'{replication_key}-asc'}
+    params = {'created_at_min':f'{created_at_min}','created_at_max':f'{created_at_max}','sort_by': f'{replication_key}-asc'}
     data_key = 'subscriptions'
 
 
