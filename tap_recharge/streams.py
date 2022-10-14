@@ -285,11 +285,11 @@ class Charges(CursorPagingStream):
     key_properties = ['id']
     path = 'charges'
     replication_key = 'updated_at'
-    updated_at_min = parsed_args.config['api_start_date']
-    updated_at_max = parsed_args.config['api_end_date']
+    created_at_min = parsed_args.config['api_start_date']
+    created_at_max = parsed_args.config['api_end_date']
     valid_replication_keys = ['updated_at']
     #params = {'sort_by':f'{replication_key}-asc'}
-    params = {'updated_at_min':f'{updated_at_min}','updated_at_max':f'{updated_at_max}','sort_by': f'{replication_key}-asc'}
+    params = {'created_at_min':f'{created_at_min}','created_at_max':f'{created_at_max}','sort_by': f'{replication_key}-asc'}
     data_key = 'charges'
 
 
