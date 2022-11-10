@@ -2,6 +2,11 @@
 This module defines the stream classes and their individual sync logic.
 """
 
+
+"""
+This module defines the stream classes and their individual sync logic.
+"""
+
 import datetime
 
 from typing import Iterator
@@ -139,13 +144,20 @@ class IncrementalStream(BaseStream):
         with metrics.record_counter(self.tap_stream_id) as counter:
             for record in self.get_records(config, bookmark_datetime):
                 transformed_record = transformer.transform(record, stream_schema, stream_metadata)
+                replication_value = transformed_record.get(self.replication_key)
 
-                record_datetime = utils.strptime_to_utc(transformed_record[self.replication_key])
+                # if replication value is not found then, write record
+                if replication_value:
+                    record_datetime = utils.strptime_to_utc(replication_value)
 
-                if record_datetime >= bookmark_datetime:
+                    # write record if we get record greater than the bookmark date or start date
+                    if record_datetime >= bookmark_datetime:
+                        singer.write_record(self.tap_stream_id, transformed_record)
+                        counter.increment()
+                        max_datetime = max(record_datetime, max_datetime)
+                else:
                     singer.write_record(self.tap_stream_id, transformed_record)
                     counter.increment()
-                    max_datetime = max(record_datetime, bookmark_datetime)
 
             bookmark_date = utils.strftime(max_datetime)
 
@@ -219,7 +231,7 @@ class PageBasedPagingStream(IncrementalStream):
         result_size = MAX_PAGE_LIMIT
 
         while result_size == MAX_PAGE_LIMIT:
-            records, _ = self.client.get(self.path, params=self.params)
+            records = self.client.get(self.path, params=self.params)
 
             result_size = len(records.get(self.data_key))
             page += 1
@@ -245,12 +257,13 @@ class CursorPagingStream(IncrementalStream):
         url = None
 
         while paging:
-            records, links = self.client.get(path, url=url, params=self.params)
+            records = self.client.get(path, url=url, params=self.params)
 
-            if links.get('next'):
-                path = None
-                self.params = None
-                url = links.get('next', {}).get('url')
+            # As per the documentation: https://developer.rechargepayments.com/2021-11/cursor_pagination,
+            # The next cursor is replicated in the API response, and we need to set the
+            # 'cursor' param with that value for getting the next page value
+            if records.get('next_cursor'):
+                self.params = {'cursor': records.get('next_cursor'), 'limit': MAX_PAGE_LIMIT}
             else:
                 paging = False
 
@@ -308,7 +321,7 @@ class Collections(CursorPagingStream):
     data_key = 'collections'
 
 
-class Customers(PageBasedPagingStream):
+class Customers(CursorPagingStream):
     """
     Retrieves customers from the Recharge API.
 
@@ -338,7 +351,7 @@ class Discounts(CursorPagingStream):
     data_key = 'discounts'
 
 
-class MetafieldsStore(PageBasedPagingStream):
+class MetafieldsStore(CursorPagingStream):
     """
     Retrieves store metafields from the Recharge API.
 
@@ -356,7 +369,7 @@ class MetafieldsStore(PageBasedPagingStream):
     data_key = 'metafields'
 
 
-class MetafieldsCustomer(PageBasedPagingStream):
+class MetafieldsCustomer(CursorPagingStream):
     """
     Retrieves customer metafields from the Recharge API.
 
@@ -374,7 +387,7 @@ class MetafieldsCustomer(PageBasedPagingStream):
     data_key = 'metafields'
 
 
-class MetafieldsSubscription(PageBasedPagingStream):
+class MetafieldsSubscription(CursorPagingStream):
     """
     Retrieves subscription metafields from the Recharge API.
 
@@ -437,22 +450,22 @@ class Products(CursorPagingStream):
     data_key = 'products'
 
 
-class Shop(FullTableStream):
+class Store(FullTableStream):
     """
     Retrieves basic info about your store setup from the Recharge API.
 
-    Docs: https://developer.rechargepayments.com/#shop
+    Docs: https://developer.rechargepayments.com/2021-11/store
     """
-    tap_stream_id = 'shop'
+    tap_stream_id = 'store'
     key_properties = ['id']
-    path = 'shop'
-    data_key = 'shop'
+    path = 'store'
+    data_key = 'store'
 
     def get_records(
             self,
             bookmark_datetime: datetime = None,
             is_parent: bool = False) -> Iterator[list]:
-        records, _ = self.client.get(self.path)
+        records = self.client.get(self.path)
 
         return [records.get(self.data_key)]
 
@@ -460,21 +473,15 @@ class Shop(FullTableStream):
 class Subscriptions(CursorPagingStream):
     """
     Retrieves subscriptions from the Recharge API.
+
     Docs: https://developer.rechargepayments.com/#list-subscriptions
     """
-
-    parsed_args = utils.parse_args(REQUIRED_CONFIG_KEYS)
-
-
     tap_stream_id = 'subscriptions'
     key_properties = ['id']
     path = 'subscriptions'
     replication_key = 'updated_at'
-    created_at_min = parsed_args.config['created_at_min']
-    created_at_max = parsed_args.config['created_at_max']
     valid_replication_keys = ['updated_at']
-    #params = {'sort_by':f'{replication_key}-asc'}
-    params = {'created_at_min':f'{created_at_min}','created_at_max':f'{created_at_max}','sort_by': f'{replication_key}-asc'}
+    params = {'sort_by': f'{replication_key}-asc'}
     data_key = 'subscriptions'
 
 
@@ -490,6 +497,5 @@ STREAMS = {
     'onetimes': Onetimes,
     'orders': Orders,
     'products': Products,
-    'shop': Shop,
     'subscriptions': Subscriptions
 }
